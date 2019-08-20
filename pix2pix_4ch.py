@@ -192,7 +192,7 @@ def load_examples():
         width = tf.shape(raw_input)[1]  # [height, width, channels]
         a_images = preprocess(raw_input[:, :width // 2, :])
         # b_images = preprocess(raw_input[:, width // 2:, :3])
-        b_images = preprocess(raw_input[:, width // 2:, :4])
+        b_images = preprocess(raw_input[:, width // 2:, :])
 
     if a.which_direction == "AtoB":
         inputs, targets = [a_images, b_images]
