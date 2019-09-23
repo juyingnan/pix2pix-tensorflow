@@ -18,19 +18,22 @@ parser.add_argument("--input_dir", help="path to folder containing images")
 parser.add_argument("--mode", required=True, choices=["train", "test", "export"])
 parser.add_argument("--output_dir", required=True, help="where to put output files")
 parser.add_argument("--seed", type=int)
-parser.add_argument("--checkpoint", default=None, help="directory with checkpoint to resume training from or use for testing")
+parser.add_argument("--checkpoint", default=None,
+                    help="directory with checkpoint to resume training from or use for testing")
 
 parser.add_argument("--max_steps", type=int, help="number of training steps (0 to disable)")
 parser.add_argument("--max_epochs", type=int, help="number of training epochs")
 parser.add_argument("--summary_freq", type=int, default=100, help="update summaries every summary_freq steps")
 parser.add_argument("--progress_freq", type=int, default=50, help="display progress every progress_freq steps")
 parser.add_argument("--trace_freq", type=int, default=0, help="trace execution every trace_freq steps")
-parser.add_argument("--display_freq", type=int, default=0, help="write current training images every display_freq steps")
+parser.add_argument("--display_freq", type=int, default=0,
+                    help="write current training images every display_freq steps")
 parser.add_argument("--save_freq", type=int, default=5000, help="save model every save_freq steps, 0 to disable")
 
 parser.add_argument("--separable_conv", action="store_true", help="use separable convolutions in the generator")
 parser.add_argument("--aspect_ratio", type=float, default=1.0, help="aspect ratio of output images (width/height)")
-parser.add_argument("--lab_colorization", action="store_true", help="split input image into brightness (A) and color (B)")
+parser.add_argument("--lab_colorization", action="store_true",
+                    help="split input image into brightness (A) and color (B)")
 parser.add_argument("--batch_size", type=int, default=1, help="number of images in batch")
 parser.add_argument("--which_direction", type=str, default="AtoB", choices=["AtoB", "BtoA"])
 parser.add_argument("--ngf", type=int, default=64, help="number of generator filters in first conv layer")
@@ -43,16 +46,30 @@ parser.add_argument("--lr", type=float, default=0.0002, help="initial learning r
 parser.add_argument("--beta1", type=float, default=0.5, help="momentum term of adam")
 parser.add_argument("--l1_weight", type=float, default=100.0, help="weight on L1 term for generator gradient")
 parser.add_argument("--gan_weight", type=float, default=1.0, help="weight on GAN term for generator gradient")
+parser.add_argument("--channel", type=int, default=3, help="color channels for images")
+parser.add_argument("--gpu_id", type=str, default='0', help="manually select which gpu to use")
+parser.add_argument("--mask", type=bool, default=False, help="whether only use masked part to calculate loss")
 
 # export options
 parser.add_argument("--output_filetype", default="png", choices=["png", "jpeg"])
 a = parser.parse_args()
 
+if a.gpu_id != '0':
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = a.gpu_id  # specify which GPU(s) to be used
+
+print("{}-channel images".format(a.channel))
+if a.mask:
+    print("calculate loss only based on masked part")
+else:
+    print("using original loss function")
+
 EPS = 1e-12
 CROP_SIZE = 256
 
 Examples = collections.namedtuple("Examples", "paths, inputs, targets, count, steps_per_epoch")
-Model = collections.namedtuple("Model", "outputs, predict_real, predict_fake, discrim_loss, discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1, gen_grads_and_vars, train")
+Model = collections.namedtuple("Model",
+                               "outputs, predict_real, predict_fake, discrim_loss, discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1, gen_grads_and_vars, train")
 
 
 def preprocess(image):
@@ -93,16 +110,19 @@ def augment(image, brightness):
 
 def discrim_conv(batch_input, out_channels, stride):
     padded_input = tf.pad(batch_input, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT")
-    return tf.layers.conv2d(padded_input, out_channels, kernel_size=4, strides=(stride, stride), padding="valid", kernel_initializer=tf.random_normal_initializer(0, 0.02))
+    return tf.layers.conv2d(padded_input, out_channels, kernel_size=4, strides=(stride, stride), padding="valid",
+                            kernel_initializer=tf.random_normal_initializer(0, 0.02))
 
 
 def gen_conv(batch_input, out_channels):
     # [batch, in_height, in_width, in_channels] => [batch, out_height, out_width, out_channels]
     initializer = tf.random_normal_initializer(0, 0.02)
     if a.separable_conv:
-        return tf.layers.separable_conv2d(batch_input, out_channels, kernel_size=4, strides=(2, 2), padding="same", depthwise_initializer=initializer, pointwise_initializer=initializer)
+        return tf.layers.separable_conv2d(batch_input, out_channels, kernel_size=4, strides=(2, 2), padding="same",
+                                          depthwise_initializer=initializer, pointwise_initializer=initializer)
     else:
-        return tf.layers.conv2d(batch_input, out_channels, kernel_size=4, strides=(2, 2), padding="same", kernel_initializer=initializer)
+        return tf.layers.conv2d(batch_input, out_channels, kernel_size=4, strides=(2, 2), padding="same",
+                                kernel_initializer=initializer)
 
 
 def gen_deconv(batch_input, out_channels):
@@ -110,10 +130,13 @@ def gen_deconv(batch_input, out_channels):
     initializer = tf.random_normal_initializer(0, 0.02)
     if a.separable_conv:
         _b, h, w, _c = batch_input.shape
-        resized_input = tf.image.resize_images(batch_input, [h * 2, w * 2], method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-        return tf.layers.separable_conv2d(resized_input, out_channels, kernel_size=4, strides=(1, 1), padding="same", depthwise_initializer=initializer, pointwise_initializer=initializer)
+        resized_input = tf.image.resize_images(batch_input, [h * 2, w * 2],
+                                               method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        return tf.layers.separable_conv2d(resized_input, out_channels, kernel_size=4, strides=(1, 1), padding="same",
+                                          depthwise_initializer=initializer, pointwise_initializer=initializer)
     else:
-        return tf.layers.conv2d_transpose(batch_input, out_channels, kernel_size=4, strides=(2, 2), padding="same", kernel_initializer=initializer)
+        return tf.layers.conv2d_transpose(batch_input, out_channels, kernel_size=4, strides=(2, 2), padding="same",
+                                          kernel_initializer=initializer)
 
 
 def lrelu(x, a):
@@ -129,11 +152,12 @@ def lrelu(x, a):
 
 
 def batchnorm(inputs):
-    return tf.layers.batch_normalization(inputs, axis=3, epsilon=1e-5, momentum=0.1, training=True, gamma_initializer=tf.random_normal_initializer(1.0, 0.02))
+    return tf.layers.batch_normalization(inputs, axis=3, epsilon=1e-5, momentum=0.1, training=True,
+                                         gamma_initializer=tf.random_normal_initializer(1.0, 0.02))
 
 
 def check_image(image):
-    assertion = tf.assert_equal(tf.shape(image)[-1], 3, message="image must have 3 color channels")
+    assertion = tf.assert_greater_equal(tf.shape(image)[-1], 3, message="image must have at least 3 color channels")
     with tf.control_dependencies([assertion]):
         image = tf.identity(image)
 
@@ -142,25 +166,31 @@ def check_image(image):
 
     # make the last dimension 3 so that you can unstack the colors
     shape = list(image.get_shape())
-    shape[-1] = 3
+    if shape[-1] <= 3:
+        shape[-1] = 3
+    else:
+        shape[-1] = 4
     image.set_shape(shape)
     return image
+
 
 # based on https://github.com/torch/image/blob/9f65c30167b2048ecbe8b7befdc6b2d6d12baee9/generic/image.c
 def rgb_to_lab(srgb):
     with tf.name_scope("rgb_to_lab"):
         srgb = check_image(srgb)
+        # srgb_pixels = tf.reshape(srgb, [-1, tf.shape(srgb)[-1]])
         srgb_pixels = tf.reshape(srgb, [-1, 3])
 
         with tf.name_scope("srgb_to_xyz"):
             linear_mask = tf.cast(srgb_pixels <= 0.04045, dtype=tf.float32)
             exponential_mask = tf.cast(srgb_pixels > 0.04045, dtype=tf.float32)
-            rgb_pixels = (srgb_pixels / 12.92 * linear_mask) + (((srgb_pixels + 0.055) / 1.055) ** 2.4) * exponential_mask
+            rgb_pixels = (srgb_pixels / 12.92 * linear_mask) + (
+                    ((srgb_pixels + 0.055) / 1.055) ** 2.4) * exponential_mask
             rgb_to_xyz = tf.constant([
                 #    X        Y          Z
-                [0.412453, 0.212671, 0.019334], # R
-                [0.357580, 0.715160, 0.119193], # G
-                [0.180423, 0.072169, 0.950227], # B
+                [0.412453, 0.212671, 0.019334],  # R
+                [0.357580, 0.715160, 0.119193],  # G
+                [0.180423, 0.072169, 0.950227],  # B
             ])
             xyz_pixels = tf.matmul(rgb_pixels, rgb_to_xyz)
 
@@ -169,19 +199,20 @@ def rgb_to_lab(srgb):
             # convert to fx = f(X/Xn), fy = f(Y/Yn), fz = f(Z/Zn)
 
             # normalize for D65 white point
-            xyz_normalized_pixels = tf.multiply(xyz_pixels, [1/0.950456, 1.0, 1/1.088754])
+            xyz_normalized_pixels = tf.multiply(xyz_pixels, [1 / 0.950456, 1.0, 1 / 1.088754])
 
-            epsilon = 6/29
-            linear_mask = tf.cast(xyz_normalized_pixels <= (epsilon**3), dtype=tf.float32)
-            exponential_mask = tf.cast(xyz_normalized_pixels > (epsilon**3), dtype=tf.float32)
-            fxfyfz_pixels = (xyz_normalized_pixels / (3 * epsilon**2) + 4/29) * linear_mask + (xyz_normalized_pixels ** (1/3)) * exponential_mask
+            epsilon = 6 / 29
+            linear_mask = tf.cast(xyz_normalized_pixels <= (epsilon ** 3), dtype=tf.float32)
+            exponential_mask = tf.cast(xyz_normalized_pixels > (epsilon ** 3), dtype=tf.float32)
+            fxfyfz_pixels = (xyz_normalized_pixels / (3 * epsilon ** 2) + 4 / 29) * linear_mask + (
+                    xyz_normalized_pixels ** (1 / 3)) * exponential_mask
 
             # convert to lab
             fxfyfz_to_lab = tf.constant([
                 #  l       a       b
-                [  0.0,  500.0,    0.0], # fx
-                [116.0, -500.0,  200.0], # fy
-                [  0.0,    0.0, -200.0], # fz
+                [0.0, 500.0, 0.0],  # fx
+                [116.0, -500.0, 200.0],  # fy
+                [0.0, 0.0, -200.0],  # fz
             ])
             lab_pixels = tf.matmul(fxfyfz_pixels, fxfyfz_to_lab) + tf.constant([-16.0, 0.0, 0.0])
 
@@ -198,17 +229,18 @@ def lab_to_rgb(lab):
             # convert to fxfyfz
             lab_to_fxfyfz = tf.constant([
                 #   fx      fy        fz
-                [1/116.0, 1/116.0,  1/116.0], # l
-                [1/500.0,     0.0,      0.0], # a
-                [    0.0,     0.0, -1/200.0], # b
+                [1 / 116.0, 1 / 116.0, 1 / 116.0],  # l
+                [1 / 500.0, 0.0, 0.0],  # a
+                [0.0, 0.0, -1 / 200.0],  # b
             ])
             fxfyfz_pixels = tf.matmul(lab_pixels + tf.constant([16.0, 0.0, 0.0]), lab_to_fxfyfz)
 
             # convert to xyz
-            epsilon = 6/29
+            epsilon = 6 / 29
             linear_mask = tf.cast(fxfyfz_pixels <= epsilon, dtype=tf.float32)
             exponential_mask = tf.cast(fxfyfz_pixels > epsilon, dtype=tf.float32)
-            xyz_pixels = (3 * epsilon**2 * (fxfyfz_pixels - 4/29)) * linear_mask + (fxfyfz_pixels ** 3) * exponential_mask
+            xyz_pixels = (3 * epsilon ** 2 * (fxfyfz_pixels - 4 / 29)) * linear_mask + (
+                    fxfyfz_pixels ** 3) * exponential_mask
 
             # denormalize for D65 white point
             xyz_pixels = tf.multiply(xyz_pixels, [0.950456, 1.0, 1.088754])
@@ -216,16 +248,17 @@ def lab_to_rgb(lab):
         with tf.name_scope("xyz_to_srgb"):
             xyz_to_rgb = tf.constant([
                 #     r           g          b
-                [ 3.2404542, -0.9692660,  0.0556434], # x
-                [-1.5371385,  1.8760108, -0.2040259], # y
-                [-0.4985314,  0.0415560,  1.0572252], # z
+                [3.2404542, -0.9692660, 0.0556434],  # x
+                [-1.5371385, 1.8760108, -0.2040259],  # y
+                [-0.4985314, 0.0415560, 1.0572252],  # z
             ])
             rgb_pixels = tf.matmul(xyz_pixels, xyz_to_rgb)
             # avoid a slightly negative number messing up the conversion
             rgb_pixels = tf.clip_by_value(rgb_pixels, 0.0, 1.0)
             linear_mask = tf.cast(rgb_pixels <= 0.0031308, dtype=tf.float32)
             exponential_mask = tf.cast(rgb_pixels > 0.0031308, dtype=tf.float32)
-            srgb_pixels = (rgb_pixels * 12.92 * linear_mask) + ((rgb_pixels ** (1/2.4) * 1.055) - 0.055) * exponential_mask
+            srgb_pixels = (rgb_pixels * 12.92 * linear_mask) + (
+                    (rgb_pixels ** (1 / 2.4) * 1.055) - 0.055) * exponential_mask
 
         return tf.reshape(srgb_pixels, tf.shape(lab))
 
@@ -261,11 +294,10 @@ def load_examples():
         raw_input = decode(contents)
         raw_input = tf.image.convert_image_dtype(raw_input, dtype=tf.float32)
 
-        assertion = tf.assert_equal(tf.shape(raw_input)[2], 3, message="image does not have 3 channels")
+        assertion = tf.assert_greater_equal(tf.shape(raw_input)[2], 3, message="image does not have 3 or 4 channels")
         with tf.control_dependencies([assertion]):
             raw_input = tf.identity(raw_input)
-
-        raw_input.set_shape([None, None, 3])
+        raw_input.set_shape([None, None, a.channel])
 
         if a.lab_colorization:
             # load color and brightness from image, no B image exists here
@@ -275,9 +307,9 @@ def load_examples():
             b_images = tf.stack([a_chan, b_chan], axis=2)
         else:
             # break apart image pair and move to range [-1, 1]
-            width = tf.shape(raw_input)[1] # [height, width, channels]
-            a_images = preprocess(raw_input[:,:width//2,:])
-            b_images = preprocess(raw_input[:,width//2:,:])
+            width = tf.shape(raw_input)[1]  # [height, width, channels]
+            a_images = preprocess(raw_input[:, :width // 2, :])
+            b_images = preprocess(raw_input[:, width // 2:, :])
 
     if a.which_direction == "AtoB":
         inputs, targets = [a_images, b_images]
@@ -288,7 +320,8 @@ def load_examples():
 
     # synchronize seed for image operations so that we do the same operations to both
     # input and output images
-    seed = random.randint(0, 2**31 - 1)
+    seed = random.randint(0, 2 ** 31 - 1)
+
     def transform(image):
         r = image
         if a.flip:
@@ -311,7 +344,8 @@ def load_examples():
     with tf.name_scope("target_images"):
         target_images = transform(targets)
 
-    paths_batch, inputs_batch, targets_batch = tf.train.batch([paths, input_images, target_images], batch_size=a.batch_size)
+    paths_batch, inputs_batch, targets_batch = tf.train.batch([paths, input_images, target_images],
+                                                              batch_size=a.batch_size)
     steps_per_epoch = int(math.ceil(len(input_paths) / a.batch_size))
 
     return Examples(
@@ -332,13 +366,13 @@ def create_generator(generator_inputs, generator_outputs_channels):
         layers.append(output)
 
     layer_specs = [
-        a.ngf * 2, # encoder_2: [batch, 128, 128, ngf] => [batch, 64, 64, ngf * 2]
-        a.ngf * 4, # encoder_3: [batch, 64, 64, ngf * 2] => [batch, 32, 32, ngf * 4]
-        a.ngf * 8, # encoder_4: [batch, 32, 32, ngf * 4] => [batch, 16, 16, ngf * 8]
-        a.ngf * 8, # encoder_5: [batch, 16, 16, ngf * 8] => [batch, 8, 8, ngf * 8]
-        a.ngf * 8, # encoder_6: [batch, 8, 8, ngf * 8] => [batch, 4, 4, ngf * 8]
-        a.ngf * 8, # encoder_7: [batch, 4, 4, ngf * 8] => [batch, 2, 2, ngf * 8]
-        a.ngf * 8, # encoder_8: [batch, 2, 2, ngf * 8] => [batch, 1, 1, ngf * 8]
+        a.ngf * 2,  # encoder_2: [batch, 128, 128, ngf] => [batch, 64, 64, ngf * 2]
+        a.ngf * 4,  # encoder_3: [batch, 64, 64, ngf * 2] => [batch, 32, 32, ngf * 4]
+        a.ngf * 8,  # encoder_4: [batch, 32, 32, ngf * 4] => [batch, 16, 16, ngf * 8]
+        a.ngf * 8,  # encoder_5: [batch, 16, 16, ngf * 8] => [batch, 8, 8, ngf * 8]
+        a.ngf * 8,  # encoder_6: [batch, 8, 8, ngf * 8] => [batch, 4, 4, ngf * 8]
+        a.ngf * 8,  # encoder_7: [batch, 4, 4, ngf * 8] => [batch, 2, 2, ngf * 8]
+        a.ngf * 8,  # encoder_8: [batch, 2, 2, ngf * 8] => [batch, 1, 1, ngf * 8]
     ]
 
     for out_channels in layer_specs:
@@ -350,13 +384,13 @@ def create_generator(generator_inputs, generator_outputs_channels):
             layers.append(output)
 
     layer_specs = [
-        (a.ngf * 8, 0.5),   # decoder_8: [batch, 1, 1, ngf * 8] => [batch, 2, 2, ngf * 8 * 2]
-        (a.ngf * 8, 0.5),   # decoder_7: [batch, 2, 2, ngf * 8 * 2] => [batch, 4, 4, ngf * 8 * 2]
-        (a.ngf * 8, 0.5),   # decoder_6: [batch, 4, 4, ngf * 8 * 2] => [batch, 8, 8, ngf * 8 * 2]
-        (a.ngf * 8, 0.0),   # decoder_5: [batch, 8, 8, ngf * 8 * 2] => [batch, 16, 16, ngf * 8 * 2]
-        (a.ngf * 4, 0.0),   # decoder_4: [batch, 16, 16, ngf * 8 * 2] => [batch, 32, 32, ngf * 4 * 2]
-        (a.ngf * 2, 0.0),   # decoder_3: [batch, 32, 32, ngf * 4 * 2] => [batch, 64, 64, ngf * 2 * 2]
-        (a.ngf, 0.0),       # decoder_2: [batch, 64, 64, ngf * 2 * 2] => [batch, 128, 128, ngf * 2]
+        (a.ngf * 8, 0.5),  # decoder_8: [batch, 1, 1, ngf * 8] => [batch, 2, 2, ngf * 8 * 2]
+        (a.ngf * 8, 0.5),  # decoder_7: [batch, 2, 2, ngf * 8 * 2] => [batch, 4, 4, ngf * 8 * 2]
+        (a.ngf * 8, 0.5),  # decoder_6: [batch, 4, 4, ngf * 8 * 2] => [batch, 8, 8, ngf * 8 * 2]
+        (a.ngf * 8, 0.0),  # decoder_5: [batch, 8, 8, ngf * 8 * 2] => [batch, 16, 16, ngf * 8 * 2]
+        (a.ngf * 4, 0.0),  # decoder_4: [batch, 16, 16, ngf * 8 * 2] => [batch, 32, 32, ngf * 4 * 2]
+        (a.ngf * 2, 0.0),  # decoder_3: [batch, 32, 32, ngf * 4 * 2] => [batch, 64, 64, ngf * 2 * 2]
+        (a.ngf, 0.0),  # decoder_2: [batch, 64, 64, ngf * 2 * 2] => [batch, 128, 128, ngf * 2]
     ]
 
     num_encoder_layers = len(layers)
@@ -410,7 +444,7 @@ def create_model(inputs, targets):
         # layer_4: [batch, 32, 32, ndf * 4] => [batch, 31, 31, ndf * 8]
         for i in range(n_layers):
             with tf.variable_scope("layer_%d" % (len(layers) + 1)):
-                out_channels = a.ndf * min(2**(i+1), 8)
+                out_channels = a.ndf * min(2 ** (i + 1), 8)
                 stride = 1 if i == n_layers - 1 else 2  # last layer here has stride 1
                 convolved = discrim_conv(layers[-1], out_channels, stride=stride)
                 normalized = batchnorm(convolved)
@@ -434,12 +468,32 @@ def create_model(inputs, targets):
     with tf.name_scope("real_discriminator"):
         with tf.variable_scope("discriminator"):
             # 2x [batch, height, width, channels] => [batch, 30, 30, 1]
-            predict_real = create_discriminator(inputs, targets)
+            if a.mask:
+                if a.channel == 3:
+                    mask_layer = tf.math.ceil(
+                        (tf.abs(targets[..., 0]) + tf.abs(targets[..., 1]) + tf.abs(targets[..., 2])) / 3)
+                    mask = tf.stack([mask_layer, mask_layer, mask_layer], axis=3)
+                else:
+                    mask_layer = targets[..., 3]
+                    mask = tf.stack([mask_layer, mask_layer, mask_layer, mask_layer], axis=3)
+                predict_real = create_discriminator(inputs * mask, targets * mask)
+            else:
+                predict_real = create_discriminator(inputs, targets)
 
     with tf.name_scope("fake_discriminator"):
         with tf.variable_scope("discriminator", reuse=True):
             # 2x [batch, height, width, channels] => [batch, 30, 30, 1]
-            predict_fake = create_discriminator(inputs, outputs)
+            if a.mask:
+                if a.channel == 3:
+                    mask_layer = tf.math.ceil(
+                        (tf.abs(targets[..., 0]) + tf.abs(targets[..., 1]) + tf.abs(targets[..., 2])) / 3)
+                    mask = tf.stack([mask_layer, mask_layer, mask_layer], axis=3)
+                else:
+                    mask_layer = targets[..., 3]
+                    mask = tf.stack([mask_layer, mask_layer, mask_layer, mask_layer], axis=3)
+                predict_fake = create_discriminator(inputs * mask, outputs * mask)
+            else:
+                predict_fake = create_discriminator(inputs, outputs)
 
     with tf.name_scope("discriminator_loss"):
         # minimizing -tf.log will try to get inputs to 1
@@ -450,8 +504,18 @@ def create_model(inputs, targets):
     with tf.name_scope("generator_loss"):
         # predict_fake => 1
         # abs(targets - outputs) => 0
+        if a.mask:
+            if a.channel == 3:
+                mask_layer = tf.math.ceil(
+                    (tf.abs(targets[..., 0]) + tf.abs(targets[..., 1]) + tf.abs(targets[..., 2])) / 3)
+                mask = tf.stack([mask_layer, mask_layer, mask_layer], axis=3)
+            else:
+                mask_layer = targets[..., 3]
+                mask = tf.stack([mask_layer, mask_layer, mask_layer, mask_layer], axis=3)
+            gen_loss_L1 = tf.reduce_mean(tf.abs((targets - outputs) * mask))
+        else:
+            gen_loss_L1 = tf.reduce_mean(tf.abs(targets - outputs))
         gen_loss_GAN = tf.reduce_mean(-tf.log(predict_fake + EPS))
-        gen_loss_L1 = tf.reduce_mean(tf.abs(targets - outputs))
         gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight
 
     with tf.name_scope("discriminator_train"):
@@ -471,7 +535,7 @@ def create_model(inputs, targets):
     update_losses = ema.apply([discrim_loss, gen_loss_GAN, gen_loss_L1])
 
     global_step = tf.train.get_or_create_global_step()
-    incr_global_step = tf.assign(global_step, global_step+1)
+    incr_global_step = tf.assign(global_step, global_step + 1)
 
     return Model(
         predict_real=predict_real,
@@ -535,7 +599,7 @@ def append_index(filesets, step=False):
 
 def main():
     if a.seed is None:
-        a.seed = random.randint(0, 2**31 - 1)
+        a.seed = random.randint(0, 2 ** 31 - 1)
 
     tf.set_random_seed(a.seed)
     np.random.seed(a.seed)
@@ -575,16 +639,17 @@ def main():
         input_image = tf.image.decode_png(input_data)
 
         # remove alpha channel if present
-        input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 4), lambda: input_image[:,:,:3], lambda: input_image)
+        # input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 4), lambda: input_image[:, :, :3], lambda: input_image)
         # convert grayscale to RGB
-        input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 1), lambda: tf.image.grayscale_to_rgb(input_image), lambda: input_image)
+        input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 1), lambda: tf.image.grayscale_to_rgb(input_image),
+                              lambda: input_image)
 
         input_image = tf.image.convert_image_dtype(input_image, dtype=tf.float32)
-        input_image.set_shape([CROP_SIZE, CROP_SIZE, 3])
+        input_image.set_shape([CROP_SIZE, CROP_SIZE, a.channel])
         batch_input = tf.expand_dims(input_image, axis=0)
 
         with tf.variable_scope("generator"):
-            batch_output = deprocess(create_generator(preprocess(batch_input), 3))
+            batch_output = deprocess(create_generator(preprocess(batch_input), tf.shape(input_image)[2]))
 
         output_image = tf.image.convert_image_dtype(batch_output, dtype=tf.uint8)[0]
         if a.output_filetype == "png":
@@ -602,7 +667,7 @@ def main():
         }
         tf.add_to_collection("inputs", json.dumps(inputs))
         outputs = {
-            "key":  tf.identity(key).name,
+            "key": tf.identity(key).name,
             "output": output.name,
         }
         tf.add_to_collection("outputs", json.dumps(outputs))
@@ -649,6 +714,9 @@ def main():
         inputs = deprocess(examples.inputs)
         targets = deprocess(examples.targets)
         outputs = deprocess(model.outputs)
+        print("inputs.shape: ", inputs.shape)
+        print("targets.shape: ", targets.shape)
+        print("outputs.shape: ", outputs.shape)
 
     def convert(image):
         if a.aspect_ratio != 1.0:
@@ -717,7 +785,7 @@ def main():
             checkpoint = tf.train.latest_checkpoint(a.checkpoint)
             saver.restore(sess, checkpoint)
 
-        max_steps = 2**32
+        max_steps = 2 ** 32
         if a.max_epochs is not None:
             max_steps = examples.steps_per_epoch * a.max_epochs
         if a.max_steps is not None:
@@ -787,7 +855,8 @@ def main():
                     train_step = (results["global_step"] - 1) % examples.steps_per_epoch + 1
                     rate = (step + 1) * a.batch_size / (time.time() - start)
                     remaining = (max_steps - step) * a.batch_size / rate
-                    print("progress  epoch %d  step %d  image/sec %0.1f  remaining %dm" % (train_epoch, train_step, rate, remaining / 60))
+                    print("progress  epoch %d  step %d  image/sec %0.1f  remaining %dm" % (
+                        train_epoch, train_step, rate, remaining / 60))
                     print("discrim_loss", results["discrim_loss"])
                     print("gen_loss_GAN", results["gen_loss_GAN"])
                     print("gen_loss_L1", results["gen_loss_L1"])
