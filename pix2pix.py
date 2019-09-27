@@ -48,7 +48,16 @@ parser.add_argument("--l1_weight", type=float, default=100.0, help="weight on L1
 parser.add_argument("--gan_weight", type=float, default=1.0, help="weight on GAN term for generator gradient")
 parser.add_argument("--channel", type=int, default=3, help="color channels for images")
 parser.add_argument("--gpu_id", type=str, default='0', help="manually select which gpu to use")
-parser.add_argument("--mask", type=bool, default=False, help="whether only use masked part to calculate loss")
+parser.add_argument("--mask", dest="mask", action="store_true", help="only use masked part to calculate loss")
+parser.add_argument("--no_mask", dest="mask", action="store_false", help="using original loss function")
+parser.set_defaults(mask=False)
+parser.add_argument("--norm", dest="norm", action="store_true", help="use l2 normalization")
+parser.add_argument("--no_norm", dest="norm", action="store_false", help="not use l2 normalization")
+parser.set_defaults(norm=False)
+parser.add_argument("--norm_axis", type=int, default=3, help="axis for l2 normalization")
+parser.add_argument("--cosine", dest="cosine", action="store_true", help="use cosine distance loss function")
+parser.add_argument("--no_cosine", dest="cosine", action="store_false", help="not use cosine distance loss function")
+parser.set_defaults(cosine=False)
 
 # export options
 parser.add_argument("--output_filetype", default="png", choices=["png", "jpeg"])
@@ -468,6 +477,9 @@ def create_model(inputs, targets):
     with tf.name_scope("real_discriminator"):
         with tf.variable_scope("discriminator"):
             # 2x [batch, height, width, channels] => [batch, 30, 30, 1]
+            _targets = targets
+            _inputs = inputs
+
             if a.mask:
                 if a.channel == 3:
                     mask_layer = tf.math.ceil(
@@ -476,13 +488,21 @@ def create_model(inputs, targets):
                 else:
                     mask_layer = targets[..., 3]
                     mask = tf.stack([mask_layer, mask_layer, mask_layer, mask_layer], axis=3)
-                predict_real = create_discriminator(inputs * mask, targets * mask)
-            else:
-                predict_real = create_discriminator(inputs, targets)
+                _inputs = _inputs * mask
+                _targets = _targets * mask
+
+            if a.norm:
+                _inputs = tf.keras.backend.l2_normalize(_inputs, axis=a.norm_axis)
+                _targets = tf.keras.backend.l2_normalize(_targets, axis=a.norm_axis)
+
+            predict_real = create_discriminator(_inputs, _targets)
 
     with tf.name_scope("fake_discriminator"):
         with tf.variable_scope("discriminator", reuse=True):
             # 2x [batch, height, width, channels] => [batch, 30, 30, 1]
+            _inputs = inputs
+            _outputs = outputs
+
             if a.mask:
                 if a.channel == 3:
                     mask_layer = tf.math.ceil(
@@ -491,9 +511,14 @@ def create_model(inputs, targets):
                 else:
                     mask_layer = targets[..., 3]
                     mask = tf.stack([mask_layer, mask_layer, mask_layer, mask_layer], axis=3)
-                predict_fake = create_discriminator(inputs * mask, outputs * mask)
-            else:
-                predict_fake = create_discriminator(inputs, outputs)
+                _inputs = _inputs * mask
+                _outputs = _outputs * mask
+
+            if a.norm:
+                _inputs = tf.keras.backend.l2_normalize(_inputs, axis=a.norm_axis)
+                _outputs = tf.keras.backend.l2_normalize(_outputs, axis=a.norm_axis)
+
+            predict_fake = create_discriminator(_inputs, _outputs)
 
     with tf.name_scope("discriminator_loss"):
         # minimizing -tf.log will try to get inputs to 1
@@ -504,6 +529,9 @@ def create_model(inputs, targets):
     with tf.name_scope("generator_loss"):
         # predict_fake => 1
         # abs(targets - outputs) => 0
+        _targets = targets
+        _outputs = outputs
+
         if a.mask:
             if a.channel == 3:
                 mask_layer = tf.math.ceil(
@@ -512,9 +540,17 @@ def create_model(inputs, targets):
             else:
                 mask_layer = targets[..., 3]
                 mask = tf.stack([mask_layer, mask_layer, mask_layer, mask_layer], axis=3)
-            gen_loss_L1 = tf.reduce_mean(tf.abs((targets - outputs) * mask))
+            _targets = _targets * mask
+            _outputs = _outputs * mask
+
+        if a.norm:
+            _outputs = tf.keras.backend.l2_normalize(_outputs, axis=a.norm_axis)
+            _targets = tf.keras.backend.l2_normalize(_targets, axis=a.norm_axis)
+
+        if a.cosine:
+            gen_loss_L1 = tf.reduce_mean(tf.abs(tf.losses.cosine_distance(_targets, _outputs, axis=a.norm_axis)))
         else:
-            gen_loss_L1 = tf.reduce_mean(tf.abs(targets - outputs))
+            gen_loss_L1 = tf.reduce_mean(tf.abs(_targets - _outputs))
         gen_loss_GAN = tf.reduce_mean(-tf.log(predict_fake + EPS))
         gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight
 
